@@ -5,29 +5,25 @@ import { Order, OrderItem, ShippingDetails } from "../model/Order.js";
 import { format } from "date-fns";
 import crypto from "crypto"
 import Product from "../model/Product.js";
+import { authenticateUser } from "../middlewares/auth.js";
+
 
 const checkoutRouter = express.Router();
 
 const checkout = async (req:Request,res:Response) =>{
 
   const userForm = req.body.user_form;
-
-  let user = await User.findOne({email:userForm.email});
+  
+  let user = await User.findOne({email:(req as any).user.email});
   
   if(!user){
-    user = new User({
-        username:userForm.name,
-        email:userForm.email,
-        mobile_number:userForm.mobile_number,
-      })
-      await user.save();
+   return res.status(403).json({
+    message:"Unauthorized"
+   })
   }
-  console.log(user,"user");
-  
  
   const shippingDetail = new ShippingDetails({
-    user:user._id,
-    name:userForm.name,
+    user:user.id,
     address:userForm.shipping_information.address,
     city:userForm.shipping_information.city,
     state:userForm.shipping_information.state,
@@ -42,39 +38,47 @@ const checkout = async (req:Request,res:Response) =>{
   const gst = Number(((subtotal * 18) / 100).toFixed(2));
   const totalAmount = (subtotal + gst).toFixed(2);
 
+  //multiplied with 100 for unit value of currency, eg: 1 rupee == 100 paisa    
+  const options = {
+    amount: totalAmount*100,
+    currency: "INR",
+  };
+  const response = await instance.orders.create(options);
+
+
   const order = new Order({
-    user:user._id,
+    orderId:response.id,
+    user:user.id,
     totalAmount:totalAmount,
-    orderDate:Date.now()
+    orderDate:Date.now(),
   })
 
-  await order.save();
 
-  for (const item of req.body.cart_items) {
-    const orderItem = new OrderItem({
+  const orderItems =  req.body.cart_items.map((item:any)=>{
+    const orderItem =  new OrderItem({
       order: order._id,
       productId:item.id,
+      description:item.description,
+      images:item.images,
+      discount_percentage:item.discount_percentage,
       category:item.category,
       title: item.title,
       quantity: item.quantity,
+      stock:item.stock,
       price: item.price,
     });
+    orderItem.save();
+    return orderItem;
+  })
 
-    await orderItem.save();
-  }
+  order.orderItems = orderItems;
+  await order.save();
 
-    //multiplied with 100 for unit value of currency, eg: 1 rupee == 100 paisa
-    var options = {
-        amount: totalAmount*100,
-        currency: "INR",
-      };
-      const response = await instance.orders.create(options);
-      console.log(response,"response on order")
-      res.status(200).json({
-        data:response,
-        order_id:order._id,
-        success:true
-      })
+  res.status(200).json({
+    data:response,
+    order_id:response.id,
+    success:true
+  })
 }
 const getRazorpayKey = async (req:Request,res:Response) =>{
     res.status(200).json({
@@ -86,33 +90,46 @@ const getRazorpayKey = async (req:Request,res:Response) =>{
 const paymentVerification = async (req:Request,res:Response) =>{
   const {razorpay_signature,razorpay_order_id,razorpay_payment_id} = req.body;
   const body = razorpay_order_id + "|" + razorpay_payment_id;
-  console.log(body,"orderid and paymentid")
 
   const generatedSignature = crypto.createHmac('sha256', process.env.RAZOR_PAY_API_SECRET_KEY as string)
   .update(body)
   .digest('hex');
   const verificationSuccess = generatedSignature === razorpay_signature;
-  console.log("secret key",process.env.RAZOR_PAY_API_SECRET_KEY)
-  console.log(generatedSignature,"--",razorpay_signature)
-  Order.findOneAndUpdate({_id:razorpay_order_id,},{$set:{status:verificationSuccess ? "Success" : "Fail"}});
- if(verificationSuccess){
-  res.status(200).json({
-    status:true,
-    message:"Payment Successful"
-  })
- }
- else{
-  res.status(400).json({
-    status:false,
-    message:"Invalid Payment"
-  })
- }
+  await Order.findOneAndUpdate({orderId:razorpay_order_id,},{$set:{status:verificationSuccess ? "Success" : "Fail"},},{ new: true });
+  if(verificationSuccess){
+    res.status(200).json({
+      status:true,
+      message:"Payment Successful"
+    })
+  }
+  else{
+    res.status(400).json({
+      status:false,
+      message:"Invalid Payment"
+    })
+  }
 }
 
 
-checkoutRouter.route("/checkout").post(checkout);
-checkoutRouter.route("/get-payment-key").get(getRazorpayKey)
-checkoutRouter.route("/payment-verification").post(paymentVerification)
+const getOrders = async (req:Request,res:Response) =>{
+
+  try {
+      const query = Order.find({user:(req as any).user.id}).populate("orderItems");
+      const docs = await query.exec();
+      res.status(200).json({data:docs,message:"Success"});
+  } catch (error) {
+      res.status(400).json(error);
+  }
+  
+}
+
+
+
+checkoutRouter.route("/checkout").post(authenticateUser,checkout);
+checkoutRouter.route("/get-payment-key").get(authenticateUser,getRazorpayKey)
+checkoutRouter.route("/payment-verification").post(authenticateUser,paymentVerification)
+checkoutRouter.route("/orders").get(authenticateUser,getOrders);
+
 
 
 

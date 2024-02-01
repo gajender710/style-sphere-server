@@ -6,13 +6,17 @@ import homeRouter from "./routes/homeRoutes.js";
 import {config} from "dotenv"
 import Razorpay from "razorpay";
 import checkoutRouter from "./routes/chekoutRoutes.js";
+import userRouter from "./routes/userRoutes.js";
+import cookieParser from "cookie-parser"
+
 config();
 
 const app = express();
 const port = process.env.PORT;
 app.use(express.json());
 
-app.use(cors())
+app.use(cors({credentials: true, origin: true,}))
+app.use(cookieParser());
 
 
 mongoose.set('strictQuery', true);
@@ -25,7 +29,8 @@ mongoose.connect(process.env.MONGO_URL as string, {
 
 
 app.use(homeRouter);
-app.use(checkoutRouter);
+app.use("/user",checkoutRouter);
+app.use(userRouter);
 
 app.listen(port,()=>{
     console.log("listening")

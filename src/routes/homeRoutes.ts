@@ -46,14 +46,6 @@ const fetchProducts = async (req:Request,res:Response) =>{
 }
 
 
-const getBusiness = (req:Request,res:Response) =>{
-
-  //  const product = new Product(req.body);
-    res.json({
-        message:"Ha",
-    })
-}
-
 
 homeRouter.route("/products").get(fetchProducts);
 homeRouter.route("/create-product").post(createProduct);

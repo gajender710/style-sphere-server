@@ -27,7 +27,7 @@ const signUp = async (req:Request,res:Response) =>{
             success:true,
             message:"Sign up Success",
             token:token,
-            data:user
+            data:{user_name:user.user_name,email:user.email}
         })
 
         
